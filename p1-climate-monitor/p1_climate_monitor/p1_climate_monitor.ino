@@ -1,7 +1,7 @@
 /*
   Project 1: Smart Room Climate Monitor
   Board: ESP32 Dev Board
-  Key Components: ESP32, DHT22, OLED (SPI SSD1306), Buzzer, Red & Green LEDs
+  Key Components: ESP32, DHT22, OLED (SPI SSD1306), Active Buzzer, Red & Green LEDs
 */
 
 #include <SPI.h>
@@ -79,11 +79,12 @@ void loop() {
     digitalWrite(RED_LED, alert ? HIGH : LOW);
     digitalWrite(GREEN_LED, alert ? LOW : HIGH);
     if (alert) {
-      digitalWrite(BUZZER_PIN, HIGH);
-    } else {
-      digitalWrite(BUZZER_PIN, LOW);
+      tone(BUZZER_PIN, 2000);   // 2000 Hz tone for clear audible warning
+      delay(1000);               // required 1s alert pulse
+      noTone(BUZZER_PIN);
     }
 
+    // Cycle display: main readings, then min/max every other 5s window
     display.clearDisplay();
     display.setCursor(0, 0);
     display.print("Temp: "); display.print(data.temperature, 1); display.println(" C");
@@ -91,6 +92,12 @@ void loop() {
     display.print("Hum:  "); display.print(data.humidity, 1); display.println(" %");
     display.setCursor(0, 24);
     display.print("Status: "); display.println(status);
+    if ((now / 5000) % 2 == 1) {
+      display.setCursor(0, 40);
+      display.print("Max: "); display.print(maxTemp, 1);
+      display.setCursor(0, 52);
+      display.print("Min: "); display.print(minTemp, 1);
+    }
     display.display();
 
     if (now - lastLog >= LOG_INTERVAL) {
