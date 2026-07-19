@@ -36,6 +36,18 @@ float measureDistance() {
   return duration * 0.034 / 2;
 }
 
+// Fix: 5-sample average to reduce spurious readings
+float averagedDistance() {
+  float sum = 0;
+  int valid = 0;
+  for (int i = 0; i < 5; i++) {
+    float d = measureDistance();
+    if (d > 0) { sum += d; valid++; }
+    delay(10);
+  }
+  return valid ? sum / valid : -1;
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(TRIG_PIN, OUTPUT);
@@ -53,14 +65,13 @@ void setup() {
 }
 
 void loop() {
-  float dist = measureDistance();
+  float dist = averagedDistance();
   String zone;
 
   if (dist > 60 || dist < 0) {
     zone = "SAFE";
     digitalWrite(GREEN_LED, HIGH); digitalWrite(YELLOW_LED, LOW); digitalWrite(RED_LED, LOW);
     beepInterval = 0;
-    noTone(BUZZER_PIN);
   } else if (dist > 30) {
     zone = "CAUTION";
     digitalWrite(GREEN_LED, LOW); digitalWrite(YELLOW_LED, HIGH); digitalWrite(RED_LED, LOW);
@@ -72,15 +83,29 @@ void loop() {
   } else {
     zone = "DANGER";
     digitalWrite(GREEN_LED, LOW); digitalWrite(YELLOW_LED, LOW); digitalWrite(RED_LED, HIGH);
-    tone(BUZZER_PIN, 2000); // continuous alarm
+    beepInterval = 0; // continuous handled separately
   }
 
-  if ((zone == "CAUTION" || zone == "CLOSE") && millis() - lastBeep > beepInterval) {
+  // Fix: non-blocking buzzer with clean state transitions
+  static String lastZone = "";
+  if (zone != lastZone) {
+    noTone(BUZZER_PIN); // stop any playing tone on zone transition
+    lastZone = zone;
+    if (zone == "CAUTION" || zone == "CLOSE") {
+      lastBeep = 0; // force immediate beep on transition
+    }
+  }
+
+  if (zone == "DANGER") {
+    tone(BUZZER_PIN, 2000); // continuous tone, no duration = stays on
+  } else if (beepInterval > 0 && millis() - lastBeep > beepInterval) {
     lastBeep = millis();
     tone(BUZZER_PIN, 1000, 100);
+  } else if (zone == "SAFE") {
+    noTone(BUZZER_PIN);
   }
 
-  // OLED: large distance text
+  // Fix: OLED proximity bar graph added alongside distance text
   display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(SSD1306_WHITE);
@@ -90,6 +115,9 @@ void loop() {
   display.setTextSize(1);
   display.setCursor(0, 20);
   display.println(zone);
+  int barLen = constrain(map((int)dist, 0, 100, 100, 0), 0, 100);
+  display.drawRect(0, 40, 104, 10, SSD1306_WHITE);
+  display.fillRect(2, 42, barLen, 6, SSD1306_WHITE);
   display.display();
 
   if (millis() - lastPrint > 500) {
