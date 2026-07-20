@@ -33,6 +33,7 @@ AsyncWebServer server(80);
 float temperature = 0, humidity = 0, pressure = 0, altitude = 0;
 int lightPercent = 0;
 unsigned long lastRead = 0;
+unsigned long lastWifiCheck = 0;
 
 String buildHtmlPage() {
   String bg = (temperature > 32) ? "#f4b183" : "#a9cce3";
@@ -73,7 +74,7 @@ void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Connected. IP: "); Serial.println(WiFi.localIP());
   } else {
-    Serial.println("WiFi connect failed.");
+    Serial.println("WiFi connect failed, will retry in background.");
   }
 }
 
@@ -140,5 +141,14 @@ void loop() {
     display.setCursor(0, 48);
     display.print("IP:"); display.println(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("N/A"));
     display.display();
+  }
+
+  // Fix: periodic Wi-Fi health check and auto-reconnection every 30 seconds
+  if (millis() - lastWifiCheck > 30000) {
+    lastWifiCheck = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi dropped, reconnecting...");
+      connectWiFi();
+    }
   }
 }
