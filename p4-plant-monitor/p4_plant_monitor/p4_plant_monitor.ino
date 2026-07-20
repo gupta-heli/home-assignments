@@ -24,6 +24,8 @@
 Adafruit_SSD1306 display(128, 64, &SPI, OLED_DC, OLED_RESET, OLED_CS);
 
 // Calibration — measure for YOUR sensor and update these values
+// DRY_RAW: reading with sensor in open air (untouched)
+// WET_RAW: reading with sensor tip dipped in water up to the marked line
 int DRY_RAW = 2207;
 int WET_RAW = 656;
 
@@ -38,10 +40,14 @@ void setup() {
   Serial.begin(115200);
   pinMode(RELAY1_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  digitalWrite(RELAY1_PIN, PUMP_OFF);
+  digitalWrite(RELAY1_PIN, PUMP_OFF); // start with pump OFF
   dht.setup(DHT_PIN, DHTesp::DHT22);
   analogReadResolution(12);
+
   pinMode(SOIL_PIN, INPUT);
+  delay(200);
+  Serial.print("soil pin idle read: ");
+  Serial.println(analogRead(SOIL_PIN));
 
   if (!display.begin(SSD1306_SWITCHCAPVCC)) {
     Serial.println("OLED init failed");
@@ -67,6 +73,20 @@ void drawOLED(int moisturePercent, float temp, String status) {
   display.display();
 }
 
+// Fix: 20-sample average to remove ADC noise and jitter from soil sensor
+int readMoisturePercent() {
+  const int numSamples = 20;
+  long sum = 0;
+  for (int i = 0; i < numSamples; i++) {
+    sum += analogRead(SOIL_PIN);
+    delay(5);
+  }
+  int raw = sum / numSamples;
+  Serial.print("raw soil ADC (avg): "); Serial.println(raw);
+  int pct = map(raw, DRY_RAW, WET_RAW, 0, 100);
+  return constrain(pct, 0, 100);
+}
+
 void loop() {
   // Manual override button (forces pump ON for 5 seconds)
   if (digitalRead(BUTTON_PIN) == LOW && !manualWater) {
@@ -77,16 +97,15 @@ void loop() {
   }
   if (manualWater && millis() - manualStart > 5000) {
     manualWater = false;
-    digitalWrite(RELAY1_PIN, pumpOn ? PUMP_ON : PUMP_OFF);
+    digitalWrite(RELAY1_PIN, pumpOn ? PUMP_ON : PUMP_OFF); // resume auto state
   }
 
   if (millis() - lastRead >= READ_INTERVAL) {
     lastRead = millis();
 
-    int raw = analogRead(SOIL_PIN);
-    int moisturePercent = constrain(map(raw, DRY_RAW, WET_RAW, 0, 100), 0, 100);
-
+    int moisturePercent = readMoisturePercent();
     TempAndHumidity data = dht.getTempAndHumidity();
+
     if (dht.getStatus() != DHTesp::ERROR_NONE) {
       Serial.print("DHT22 error: ");
       Serial.println(dht.getStatusString());
@@ -94,7 +113,7 @@ void loop() {
 
     String soilStatus = moisturePercent < 30 ? "DRY" : (moisturePercent > 70 ? "WET" : "OPTIMAL");
 
-    // Hysteresis: pump ON below 30%, OFF above 40%
+    // Hysteresis: pump ON below 30%, OFF above 40% — prevents rapid switching
     if (!pumpOn && moisturePercent < 30) {
       pumpOn = true;
       if (!manualWater) digitalWrite(RELAY1_PIN, PUMP_ON);
