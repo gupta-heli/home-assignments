@@ -1,0 +1,6 @@
+config.h
+*.d
+*.o
+*.obj
+*.elf
+*.bin
