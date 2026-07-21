@@ -19,19 +19,21 @@ Stepper myStepper(STEPS_PER_REV, 8, 10, 9, 7); // IN1=8, IN2=9, IN3=10, IN4=7
 #define CCW_BTN   3
 #define HOME_BTN  4
 
-// SPI OLED
+// SPI OLED (hardware SPI on Uno: SCK=13, MOSI=11 - kept free of stepper pins)
 #define OLED_CS    5
 #define OLED_DC    6
 #define OLED_RESET A1
 Adafruit_SSD1306 display(128, 64, &SPI, OLED_DC, OLED_RESET, OLED_CS);
 
-long currentSteps = 0;
+long currentSteps = 0;   // absolute position
 long targetSteps = 0;
 String currentDir = "--";
 
+bool lastCW = HIGH, lastCCW = HIGH, lastHome = HIGH;
+
 void setup() {
   Serial.begin(115200);
-  myStepper.setSpeed(10); // 10 RPM
+  myStepper.setSpeed(10); // RPM - do not exceed ~15 for 28BYJ-48
 
   pinMode(CW_BTN, INPUT_PULLUP);
   pinMode(CCW_BTN, INPUT_PULLUP);
@@ -66,28 +68,48 @@ void updateOLED(String dir) {
 }
 
 void loop() {
+  // Potentiometer sets target angle 0-360
   int potRaw = analogRead(POT_PIN);
   float targetAngle = map(potRaw, 0, 1023, 0, 360);
   targetSteps = (long)(targetAngle / 360.0 * STEPS_PER_REV);
 
-  if (digitalRead(CW_BTN) == LOW) {
+  static long lastTargetSteps = -1;
+  bool targetChanged = (targetSteps != lastTargetSteps);
+  if (targetChanged) {
+    lastTargetSteps = targetSteps;
+  }
+
+  bool cw = digitalRead(CW_BTN);
+  bool ccw = digitalRead(CCW_BTN);
+  bool home = digitalRead(HOME_BTN);
+
+  bool actionTaken = false;
+
+  // Latching switch handling: trigger step on any state toggle
+  if (cw != lastCW) {
     myStepper.step(512); // +45 deg
     currentSteps += 512;
     currentDir = "CW";
-    updateOLED(currentDir);
-    delay(200);
+    actionTaken = true;
+    Serial.print("CW step, position: "); Serial.println(currentSteps);
   }
-  if (digitalRead(CCW_BTN) == LOW) {
+  if (ccw != lastCCW) {
     myStepper.step(-512); // -45 deg
     currentSteps -= 512;
     currentDir = "CCW";
-    updateOLED(currentDir);
-    delay(200);
+    actionTaken = true;
+    Serial.print("CCW step, position: "); Serial.println(currentSteps);
   }
-  if (digitalRead(HOME_BTN) == LOW) {
-    currentSteps = 0;
+  if (home != lastHome) {
+    currentSteps = 0; // logical home reset
     currentDir = "HOME SET";
-    updateOLED(currentDir);
-    delay(200);
+    actionTaken = true;
+    Serial.println("Home position set (logical, no movement)");
   }
+
+  if (actionTaken || targetChanged) {
+    updateOLED(currentDir);
+  }
+
+  lastCW = cw; lastCCW = ccw; lastHome = home;
 }
