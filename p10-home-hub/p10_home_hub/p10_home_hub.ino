@@ -111,6 +111,7 @@ void applyAutomationRules() {
   if (fanManual && millis() > fanManualUntil) fanManual = false;
   if (lightManual && millis() > lightManualUntil) lightManual = false;
 
+  // Rule 3: Gas safety shutdown takes priority over everything
   if (gasPercent > 60) {
     digitalWrite(BUZZER_PIN, HIGH);
     digitalWrite(RED_LED, HIGH);
@@ -122,11 +123,13 @@ void applyAutomationRules() {
     digitalWrite(RED_LED, LOW);
   }
 
+  // Rule 1: Fan hysteresis by temperature (skip if manual override active)
   if (!fanManual) {
     if (!fanOn && temperature > 33) fanOn = true;
     else if (fanOn && temperature < 28) fanOn = false;
   }
 
+  // Rule 2: Light by LDR + PIR (skip if manual override active)
   if (!lightManual) {
     bool dark = lightPercent < 20;
     bool noMotionFor3Min = (millis() - lastMotionTime) > 3UL * 60UL * 1000UL;
@@ -225,9 +228,27 @@ void setup() {
     req->redirect("/");
   });
   server.begin();
+
+  // Force initial sensor reading and automation rule check on boot
+  readSensors();
+  applyAutomationRules();
 }
 
 void loop() {
+  // manual button overrides (edge-triggered, active-low)
+  static bool lastFanBtn = HIGH, lastLightBtn = HIGH;
+  bool fanBtn = digitalRead(FAN_BTN);
+  bool lightBtn = digitalRead(LIGHT_BTN);
+  if (fanBtn == LOW && lastFanBtn == HIGH) {
+    fanOn = !fanOn; fanManual = true; fanManualUntil = millis() + 10UL * 60UL * 1000UL;
+    applyRelays();
+  }
+  if (lightBtn == LOW && lastLightBtn == HIGH) {
+    lightOn = !lightOn; lightManual = true; lightManualUntil = millis() + 10UL * 60UL * 1000UL;
+    applyRelays();
+  }
+  lastFanBtn = fanBtn; lastLightBtn = lightBtn;
+
   if (millis() - lastSensorRead > 5000) {
     lastSensorRead = millis();
     readSensors();
